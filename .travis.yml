@@ -15,4 +15,5 @@ script:
   - rustc --version
   - RUST_BACKTRACE=1 cargo build
 global_env: LD_LIBRARY_PATH=/usr/local/lib
+dist: trusty
 os: linux
