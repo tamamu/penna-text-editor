@@ -7,4 +7,4 @@ authors = ["tamamu <tamamu.1r1s@gmail.com>"]
 gtk = { git = "https://github.com/gtk-rs/gtk.git" }
 
 [features]
-default = ["gtk/v3_10"]
+default = ["gtk/v3_16"]
