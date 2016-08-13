@@ -5,7 +5,7 @@ rust:
 matrix:
   allow_failures:
     - rust: nightly
-sudo: true
+sudo: required
 before_install:
   - yes | sudo add-apt-repository ppa:ricotz/testing
   - sudo apt-get -qq update
