@@ -1,0 +1,10 @@
+[package]
+name = "penna"
+version = "0.1.0"
+authors = ["tamamu <tamamu.1r1s@gmail.com>"]
+
+[dependencies]
+gtk = { git = "https://github.com/gtk-rs/gtk.git" }
+
+[features]
+default = ["gtk/v3_10"]
