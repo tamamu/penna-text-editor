@@ -5,7 +5,14 @@ rust:
 matrix:
   allow_failures:
     - rust: nightly
+sudo: true
 before_install:
+  - yes | sudo add-apt-repository ppa:ricotz/testing
   - sudo apt-get -qq update
-  - sudo apt-get install -y libglib2.0-dev libpango1.0-dev libpango1.0-0
-  - export GTK=3.18
+install:
+  - sudo apt-get install libgtk-3-dev
+script:
+  - rustc --version
+  - RUST_BACKTRACE=1 cargo build
+global_env: LD_LIBRARY_PATH=/usr/local/lib
+os: linux
