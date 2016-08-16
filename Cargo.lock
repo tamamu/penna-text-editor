@@ -2,7 +2,9 @@
 name = "penna"
 version = "0.1.0"
 dependencies = [
+ "gdk 0.5.0 (git+https://github.com/gtk-rs/gdk)",
  "gtk 0.1.0 (git+https://github.com/gtk-rs/gtk.git)",
+ "lazy_static 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -203,6 +205,11 @@ dependencies = [
  "pango-sys 0.3.1 (git+https://github.com/gtk-rs/sys)",
  "pkg-config 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "lazy_static"
+version = "0.1.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "libc"
