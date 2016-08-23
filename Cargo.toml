@@ -4,7 +4,9 @@ version = "0.1.0"
 authors = ["tamamu <tamamu.1r1s@gmail.com>"]
 
 [dependencies]
+lazy_static = "0.1.*"
 gtk = { git = "https://github.com/gtk-rs/gtk.git" }
+gdk = { git = "https://github.com/gtk-rs/gdk.git" }
 
 [features]
 default = ["gtk/v3_16"]

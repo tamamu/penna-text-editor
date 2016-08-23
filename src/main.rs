@@ -1,7 +1,102 @@
+#[macro_use]
+extern crate lazy_static;
 extern crate gtk;
+extern crate gdk;
+
+use std::rc::Rc;
+use std::cell::RefCell;
+use std::sync::Mutex;
 use gtk::prelude::*;
-use gtk::{Window, WindowType, HeaderBar, Box, Orientation, Statusbar, TextView, Menu,
-          ImageMenuItem, MenuButton, Image, Popover};
+use gtk::{Window, WindowType, HeaderBar, Box, Orientation, TextView, ImageMenuItem, MenuButton,
+          Image, Popover, TextBuffer, TextIter, AccelGroup, Button};
+use gdk::{EventKey, ModifierType};
+
+struct Change {
+    start: i32,
+    end: i32,
+    text: String,
+}
+
+struct AppState {
+    history: Vec<Change>,
+}
+
+lazy_static! {
+    static ref APP: Mutex<AppState> = Mutex::new(AppState{history: Vec::with_capacity(10000)});
+}
+
+fn on_insert_text(buf: &TextBuffer, iter: &TextIter, new_text: &str) {
+    let insert_length = new_text.chars().count() as i32;
+    let start_offset = iter.get_offset();
+    let end_offset = start_offset + insert_length;
+    APP.lock().unwrap().history.push(Change {
+        start: start_offset,
+        end: end_offset,
+        text: String::from(new_text),
+    });
+    println!("{}", APP.lock().unwrap().history.len());
+}
+
+fn call_undo(buf: &TextBuffer) {
+    match APP.lock().unwrap().history.pop() {
+        Some(last_change) => {
+            let start_iter = buf.get_iter_at_offset(last_change.start);
+            let end_iter = buf.get_iter_at_offset(last_change.end);
+            buf.select_range(&start_iter, &end_iter);
+            buf.delete_selection(false, true);
+        }
+        None => {}
+    }
+}
+
+struct Editor {
+    history: Rc<RefCell<Vec<Change>>>,
+    view: TextView,
+    buffer: TextBuffer, // undo_button: Button,
+}
+
+impl Editor {
+    fn new() -> Self {
+        let mut history = Rc::new(RefCell::new(Vec::with_capacity(10000)));
+        let view = gtk::TextView::new();
+        let buffer = view.get_buffer().unwrap();
+        Editor {
+            history: history,
+            view: view,
+            buffer: buffer,
+        }
+    }
+
+    fn activate(&self) {
+        let history_ptr = self.history.clone();
+        self.buffer.connect_insert_text(move |buf: &TextBuffer,
+                                              iter: &TextIter,
+                                              new_text: &str| {
+            let ref mut history = history_ptr.borrow_mut();
+            let insert_length = new_text.chars().count() as i32;
+            let start_offset = iter.get_offset();
+            let end_offset = start_offset + insert_length;
+            history.push(Change {
+                start: start_offset,
+                end: end_offset,
+                text: String::from(new_text),
+            });
+        });
+    }
+
+    fn undo(&self) {
+        match self.history.borrow_mut().pop() {
+            Some(last_change) => {
+                let start_iter = self.buffer.get_iter_at_offset(last_change.start);
+                let end_iter = self.buffer.get_iter_at_offset(last_change.end);
+                self.buffer.select_range(&start_iter, &end_iter);
+                self.buffer.delete_selection(false, true);
+            }
+            None => {}
+        }
+    }
+}
+
 
 fn main() {
     gtk::init().expect("Failed to initialize GTK.");
@@ -21,13 +116,30 @@ fn main() {
 
     let hbox = Box::new(Orientation::Vertical, 2);
 
-    let view = TextView::new();
-    let buffer = view.get_buffer();
+    // let accel_group = AccelGroup::new();
+    // window.add_accel_group(&accel_group);
 
-    // let file_menu = Menu::new();
+    // let view = TextView::new();
+    // view.add_accelerator("activate",
+    //                     accel_group,
+    //                     'u',
+    //                     ModifierType::ControlMask,
+    //                     AccelFlags::Visible);
+    // let buffer = view.get_buffer().unwrap();
+    // buffer.connect_insert_text(on_insert_text);
+
+    let editor = Rc::new(RefCell::new(Editor::new()));
+    editor.borrow().activate();
+
+    let editor_ref = editor.clone();
+
+    let undo_button = Button::new_from_icon_name("edit-undo", 24);
+    undo_button.connect_clicked(move |_| {
+        editor_ref.borrow().undo();
+    });
+
     let open_item = ImageMenuItem::new_with_label("Open");
     let file_menu_button = MenuButton::new();
-    // file_menu_button.set_label("File");
     let gears_icon = Image::new_from_icon_name("open-menu", 24);
     let open_icon = Image::new_from_icon_name("document-open", 24);
     let popover = Popover::new(Some(&file_menu_button));
@@ -36,20 +148,16 @@ fn main() {
     file_menu_button.set_image(&gears_icon);
     open_item.set_image(Some(&open_icon));
 
-    // file_menu.attach(&open_item, 0, 1, 0, 1);
     file_menu_button.set_popover(Some(&popover));
-    // file_menu.show_all();
     popover.add(&open_item);
     // popover.show_all();
 
 
+    headerbar.pack_start(&undo_button);
     headerbar.pack_end(&file_menu_button);
 
-    // let statusbar = Statusbar::new();
     window.set_titlebar(Some(&headerbar));
-    // hbox.pack_start(&headerbar, false, false, 0);
-    hbox.pack_start(&view, true, true, 2);
-    // hbox.pack_end(&statusbar, false, false, 0);
+    hbox.pack_start(&editor.borrow().view, true, true, 2);
 
     window.add(&hbox);
 
