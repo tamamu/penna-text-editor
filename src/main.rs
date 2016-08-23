@@ -6,7 +6,7 @@ extern crate gdk;
 use std::sync::Mutex;
 use gtk::prelude::*;
 use gtk::{Window, WindowType, HeaderBar, Box, Orientation, TextView, ImageMenuItem, MenuButton,
-          Image, Popover, TextBuffer, TextIter, AccelGroup};
+          Image, Popover, TextBuffer, TextIter, AccelGroup, Button};
 use gdk::{EventKey, ModifierType};
 
 struct Change {
@@ -47,25 +47,50 @@ fn call_undo(buf: &TextBuffer) {
     }
 }
 
-fn on_key_press(view: &TextView, key: &gdk::EventKey) -> Inhibit {
-    println!("{}", key.get_keyval());
-    let mut result = false;
-    match key.get_keyval() {
-        117 => {
-            if view.im_context_filter_keypress(key) {
-                Inhibit(true)
-            }
+struct Editor {
+    history: Vec<Change>,
+    view: TextView,
+    buffer: TextBuffer, // undo_button: Button,
+}
+
+impl Editor {
+    fn new() -> Self {
+        let view = gtk::TextView::new();
+        let buffer = view.get_buffer().unwrap();
+        Editor {
+            history: Vec::with_capacity(10000),
+            view: view,
+            buffer: buffer,
         }
-        _ => Inhibit(false),
+    }
+
+    fn activate(&self) {
+        {
+            self.buffer.connect_insert_text(|buf: &TextBuffer, iter: &TextIter, new_text: &str| {
+                let insert_length = new_text.chars().count() as i32;
+                let start_offset = iter.get_offset();
+                let end_offset = start_offset + insert_length;
+                self.history.push(Change {
+                    start: start_offset,
+                    end: end_offset,
+                    text: String::from(new_text),
+                });
+            });
+        }
+    }
+
+    fn undo(&self) {
+        match self.history.pop() {
+            Some(last_change) => {
+                let start_iter = self.buffer.get_iter_at_offset(last_change.start);
+                let end_iter = self.buffer.get_iter_at_offset(last_change.end);
+                self.buffer.select_range(&start_iter, &end_iter);
+                self.buffer.delete_selection(false, true);
+            }
+            None => {}
+        }
     }
 }
-
-struct MainWindow {
-    window: Window,
-    headerbar: HeaderBar,
-    editor: TextView,
-}
-
 
 
 fn main() {
@@ -86,17 +111,22 @@ fn main() {
 
     let hbox = Box::new(Orientation::Vertical, 2);
 
-    let accel_group = AccelGroup::new();
-    window.add_accel_group(&accel_group);
+    // let accel_group = AccelGroup::new();
+    // window.add_accel_group(&accel_group);
 
-    let view = TextView::new();
-    view.add_accelerator("activate",
-                         accel_group,
-                         'u',
-                         ModifierType::ControlMask,
-                         AccelFlags::Visible);
-    let buffer = view.get_buffer().unwrap();
-    buffer.connect_insert_text(on_insert_text);
+    // let view = TextView::new();
+    // view.add_accelerator("activate",
+    //                     accel_group,
+    //                     'u',
+    //                     ModifierType::ControlMask,
+    //                     AccelFlags::Visible);
+    // let buffer = view.get_buffer().unwrap();
+    // buffer.connect_insert_text(on_insert_text);
+
+    let editor = Editor::new();
+    editor.activate();
+
+    let undo_button = Button::new_from_icon_name("edit-undo", 24);
 
     let open_item = ImageMenuItem::new_with_label("Open");
     let file_menu_button = MenuButton::new();
@@ -116,7 +146,7 @@ fn main() {
     headerbar.pack_end(&file_menu_button);
 
     window.set_titlebar(Some(&headerbar));
-    hbox.pack_start(&view, true, true, 2);
+    hbox.pack_start(&editor.view, true, true, 2);
 
     window.add(&hbox);
 
