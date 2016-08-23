@@ -3,6 +3,8 @@ extern crate lazy_static;
 extern crate gtk;
 extern crate gdk;
 
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::sync::Mutex;
 use gtk::prelude::*;
 use gtk::{Window, WindowType, HeaderBar, Box, Orientation, TextView, ImageMenuItem, MenuButton,
@@ -48,39 +50,42 @@ fn call_undo(buf: &TextBuffer) {
 }
 
 struct Editor {
-    history: Vec<Change>,
+    history: Rc<RefCell<Vec<Change>>>,
     view: TextView,
     buffer: TextBuffer, // undo_button: Button,
 }
 
 impl Editor {
     fn new() -> Self {
+        let mut history = Rc::new(RefCell::new(Vec::with_capacity(10000)));
         let view = gtk::TextView::new();
         let buffer = view.get_buffer().unwrap();
         Editor {
-            history: Vec::with_capacity(10000),
+            history: history,
             view: view,
             buffer: buffer,
         }
     }
 
     fn activate(&self) {
-        {
-            self.buffer.connect_insert_text(|buf: &TextBuffer, iter: &TextIter, new_text: &str| {
-                let insert_length = new_text.chars().count() as i32;
-                let start_offset = iter.get_offset();
-                let end_offset = start_offset + insert_length;
-                self.history.push(Change {
-                    start: start_offset,
-                    end: end_offset,
-                    text: String::from(new_text),
-                });
+        let history_ptr = self.history.clone();
+        self.buffer.connect_insert_text(move |buf: &TextBuffer,
+                                              iter: &TextIter,
+                                              new_text: &str| {
+            let ref mut history = history_ptr.borrow_mut();
+            let insert_length = new_text.chars().count() as i32;
+            let start_offset = iter.get_offset();
+            let end_offset = start_offset + insert_length;
+            history.push(Change {
+                start: start_offset,
+                end: end_offset,
+                text: String::from(new_text),
             });
-        }
+        });
     }
 
     fn undo(&self) {
-        match self.history.pop() {
+        match self.history.borrow_mut().pop() {
             Some(last_change) => {
                 let start_iter = self.buffer.get_iter_at_offset(last_change.start);
                 let end_iter = self.buffer.get_iter_at_offset(last_change.end);
@@ -123,10 +128,15 @@ fn main() {
     // let buffer = view.get_buffer().unwrap();
     // buffer.connect_insert_text(on_insert_text);
 
-    let editor = Editor::new();
-    editor.activate();
+    let editor = Rc::new(RefCell::new(Editor::new()));
+    editor.borrow().activate();
+
+    let editor_ref = editor.clone();
 
     let undo_button = Button::new_from_icon_name("edit-undo", 24);
+    undo_button.connect_clicked(move |_| {
+        editor_ref.borrow().undo();
+    });
 
     let open_item = ImageMenuItem::new_with_label("Open");
     let file_menu_button = MenuButton::new();
@@ -143,10 +153,11 @@ fn main() {
     // popover.show_all();
 
 
+    headerbar.pack_start(&undo_button);
     headerbar.pack_end(&file_menu_button);
 
     window.set_titlebar(Some(&headerbar));
-    hbox.pack_start(&editor.view, true, true, 2);
+    hbox.pack_start(&editor.borrow().view, true, true, 2);
 
     window.add(&hbox);
 
