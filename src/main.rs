@@ -5,95 +5,130 @@ extern crate gdk;
 
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::cell::Cell;
 use std::sync::Mutex;
 use gtk::prelude::*;
 use gtk::{Window, WindowType, HeaderBar, Box, Orientation, TextView, ImageMenuItem, MenuButton,
           Image, Popover, TextBuffer, TextIter, AccelGroup, Button};
 use gdk::{EventKey, ModifierType};
 
+#[derive(Clone)]
+enum ChangeType {
+    Insert,
+    Delete,
+}
+
+#[derive(Clone)]
 struct Change {
+    action: ChangeType,
     start: i32,
     end: i32,
     text: String,
 }
 
-struct AppState {
-    history: Vec<Change>,
-}
-
-lazy_static! {
-    static ref APP: Mutex<AppState> = Mutex::new(AppState{history: Vec::with_capacity(10000)});
-}
-
-fn on_insert_text(buf: &TextBuffer, iter: &TextIter, new_text: &str) {
-    let insert_length = new_text.chars().count() as i32;
-    let start_offset = iter.get_offset();
-    let end_offset = start_offset + insert_length;
-    APP.lock().unwrap().history.push(Change {
-        start: start_offset,
-        end: end_offset,
-        text: String::from(new_text),
-    });
-    println!("{}", APP.lock().unwrap().history.len());
-}
-
-fn call_undo(buf: &TextBuffer) {
-    match APP.lock().unwrap().history.pop() {
-        Some(last_change) => {
-            let start_iter = buf.get_iter_at_offset(last_change.start);
-            let end_iter = buf.get_iter_at_offset(last_change.end);
-            buf.select_range(&start_iter, &end_iter);
-            buf.delete_selection(false, true);
-        }
-        None => {}
-    }
-}
-
 struct Editor {
-    history: Rc<RefCell<Vec<Change>>>,
+    undo_pool: Rc<RefCell<Vec<Change>>>,
+    redo_pool: Rc<RefCell<Vec<Change>>>,
     view: TextView,
     buffer: TextBuffer, // undo_button: Button,
+    user_action: Rc<Cell<bool>>,
 }
 
 impl Editor {
     fn new() -> Self {
-        let mut history = Rc::new(RefCell::new(Vec::with_capacity(10000)));
+        let mut undo_pool = Rc::new(RefCell::new(Vec::with_capacity(8192)));
+        let mut redo_pool = Rc::new(RefCell::new(Vec::with_capacity(8192)));
+        let mut user_action = Rc::new(Cell::new(false));
         let view = gtk::TextView::new();
         let buffer = view.get_buffer().unwrap();
         Editor {
-            history: history,
+            undo_pool: undo_pool,
+            redo_pool: redo_pool,
             view: view,
             buffer: buffer,
+            user_action: user_action,
         }
     }
 
     fn activate(&self) {
-        let history_ptr = self.history.clone();
+        let undo_pool_ptr1 = self.undo_pool.clone();
+        let undo_pool_ptr2 = self.undo_pool.clone();
+        let redo_pool_ptr1 = self.redo_pool.clone();
+        let ua_ptr1 = self.user_action.clone();
+        let ua_ptr2 = self.user_action.clone();
+        let ua_ptr3 = self.user_action.clone();
+        let ua_ptr4 = self.user_action.clone();
+
+        self.buffer.connect_begin_user_action(move |buf: &TextBuffer| {
+            ua_ptr1.set(true);
+        });
+
+        self.buffer.connect_end_user_action(move |buf: &TextBuffer| {
+            ua_ptr2.set(false);
+        });
+
         self.buffer.connect_insert_text(move |buf: &TextBuffer,
                                               iter: &TextIter,
                                               new_text: &str| {
-            let ref mut history = history_ptr.borrow_mut();
+            if ua_ptr3.get() == false {
+                return;
+            }
+            let mut undo_pool = undo_pool_ptr1.borrow_mut();
+            let mut redo_pool = redo_pool_ptr1.borrow_mut();
+            redo_pool.clear();
             let insert_length = new_text.chars().count() as i32;
             let start_offset = iter.get_offset();
             let end_offset = start_offset + insert_length;
-            history.push(Change {
+            undo_pool.push(Change {
+                action: ChangeType::Insert,
                 start: start_offset,
                 end: end_offset,
                 text: String::from(new_text),
             });
         });
+
+        self.buffer
+            .connect_delete_range(move |buf: &TextBuffer, start: &TextIter, end: &TextIter| {
+                if ua_ptr4.get() == false {
+                    return;
+                }
+                let mut undo_pool = undo_pool_ptr2.borrow_mut();
+                let start_offset = start.get_offset();
+                let end_offset = end.get_offset();
+                let text = buf.get_slice(start, end, true).unwrap();
+                undo_pool.push(Change {
+                    action: ChangeType::Delete,
+                    start: start_offset,
+                    end: end_offset,
+                    text: text,
+                });
+            });
+
+
     }
 
-    fn undo(&self) {
-        match self.history.borrow_mut().pop() {
-            Some(last_change) => {
-                let start_iter = self.buffer.get_iter_at_offset(last_change.start);
-                let end_iter = self.buffer.get_iter_at_offset(last_change.end);
-                self.buffer.select_range(&start_iter, &end_iter);
-                self.buffer.delete_selection(false, true);
-            }
-            None => {}
+    fn undo(&mut self) {
+        let mut undo_pool = self.undo_pool.borrow_mut();
+        if undo_pool.len() == 0 {
+            return;
         }
+        let change = undo_pool.pop().unwrap();
+        let mut start_iter = self.buffer.get_iter_at_offset(change.start);
+        match change.action {
+            ChangeType::Insert => {
+                let mut end_iter = self.buffer.get_iter_at_offset(change.end);
+                self.buffer.delete(&mut start_iter, &mut end_iter);
+            }
+            ChangeType::Delete => {
+                self.buffer.insert(&mut start_iter, &change.text);
+            }
+        }
+        self.iter_on_screen(&start_iter, "insert");
+    }
+
+    fn iter_on_screen(&self, iter: &TextIter, mark_str: &str) {
+        self.buffer.place_cursor(iter);
+        self.view.scroll_mark_onscreen(&self.buffer.get_mark(mark_str).unwrap());
     }
 }
 
@@ -116,26 +151,14 @@ fn main() {
 
     let hbox = Box::new(Orientation::Vertical, 2);
 
-    // let accel_group = AccelGroup::new();
-    // window.add_accel_group(&accel_group);
-
-    // let view = TextView::new();
-    // view.add_accelerator("activate",
-    //                     accel_group,
-    //                     'u',
-    //                     ModifierType::ControlMask,
-    //                     AccelFlags::Visible);
-    // let buffer = view.get_buffer().unwrap();
-    // buffer.connect_insert_text(on_insert_text);
-
-    let editor = Rc::new(RefCell::new(Editor::new()));
+    let mut editor = Rc::new(RefCell::new(Editor::new()));
     editor.borrow().activate();
 
-    let editor_ref = editor.clone();
+    let mut editor_ref = editor.clone();
 
     let undo_button = Button::new_from_icon_name("edit-undo", 24);
     undo_button.connect_clicked(move |_| {
-        editor_ref.borrow().undo();
+        editor_ref.borrow_mut().undo();
     });
 
     let open_item = ImageMenuItem::new_with_label("Open");
