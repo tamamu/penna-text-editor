@@ -124,6 +124,27 @@ impl Editor {
             }
         }
         self.iter_on_screen(&start_iter, "insert");
+        self.redo_pool.borrow_mut().push(change);
+    }
+
+    fn redo(&mut self) {
+        let mut redo_pool = self.redo_pool.borrow_mut();
+        if redo_pool.len() == 0 {
+            return;
+        }
+        let change = redo_pool.pop().unwrap();
+        let mut start_iter = self.buffer.get_iter_at_offset(change.start);
+        let mut end_iter = self.buffer.get_iter_at_offset(change.end);
+        match change.action {
+            ChangeType::Insert => {
+                self.buffer.insert(&mut start_iter, &change.text);
+            }
+            ChangeType::Delete => {
+                self.buffer.delete(&mut start_iter, &mut end_iter);
+            }
+        }
+        self.iter_on_screen(&start_iter, "insert");
+        self.undo_pool.borrow_mut().push(change);
     }
 
     fn iter_on_screen(&self, iter: &TextIter, mark_str: &str) {
@@ -154,11 +175,18 @@ fn main() {
     let mut editor = Rc::new(RefCell::new(Editor::new()));
     editor.borrow().activate();
 
-    let mut editor_ref = editor.clone();
+    let mut editor_ptr1 = editor.clone();
+    let mut editor_ptr2 = editor.clone();
 
     let undo_button = Button::new_from_icon_name("edit-undo", 24);
+    undo_button.set_can_focus(false);
     undo_button.connect_clicked(move |_| {
-        editor_ref.borrow_mut().undo();
+        editor_ptr1.borrow_mut().undo();
+    });
+    let redo_button = Button::new_from_icon_name("edit-redo", 24);
+    redo_button.set_can_focus(false);
+    redo_button.connect_clicked(move |_| {
+        editor_ptr2.borrow_mut().redo();
     });
 
     let open_item = ImageMenuItem::new_with_label("Open");
@@ -177,6 +205,7 @@ fn main() {
 
 
     headerbar.pack_start(&undo_button);
+    headerbar.pack_start(&redo_button);
     headerbar.pack_end(&file_menu_button);
 
     window.set_titlebar(Some(&headerbar));
